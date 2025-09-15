@@ -8,7 +8,7 @@ export CUDA_VISIBLE_DEVICES=0
 accelerate launch train_fairanon_OSG.py \
   --model_id "stabilityai/stable-diffusion-2-inpainting" \
   --data_dir "./data/asian_faces" \
-  --output_dir "./outputs/fairanon_stage1" \
+  --output_dir "./outputs/fairanon_OSG" \
   --resolution 512 \
   --train_batch_size 1 \
   --gradient_accumulation_steps 4 \
