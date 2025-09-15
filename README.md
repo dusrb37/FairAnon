@@ -34,9 +34,9 @@ This repository contains the implementation of **FairAnon**, a demographically f
 ## 💡 Model Checkpoints
 Check out our models on Hugging Face:
 
-[![FairAnon-OSG](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Anonymize--Anyone-blue)](https://huggingface.co/dusrb37/FairAnon-OSG)
+[![FairAnon-OSG](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-FairAnon--OSG-blue)](https://huggingface.co/dusrb37/FairAnon-OSG)
 
-[![FairAnon-SimPO-LoRA](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-SimPO--LoRA-blue)](https://huggingface.co/dusrb37/FairAnon-SimPO-LoRA)
+[![FairAnon-SimPO-LoRA](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-FairAnon--SimPO--LoRA-blue)](https://huggingface.co/dusrb37/FairAnon-SimPO-LoRA)
 
 
 ## :hammer: Setup
