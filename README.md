@@ -154,4 +154,4 @@ accelerate launch train_diffusion_simpo.py \
 
 ## ✈️ Inference
 
-To inference, Checkout - `inference.ip` for mode details.
+To inference, Checkout - `inference.py` for mode details.
