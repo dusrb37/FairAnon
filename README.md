@@ -101,7 +101,7 @@ bash train_fairanon_OSG.sh
 
 # Or run directly:
 accelerate launch train_fairanon_OSG.py \
-  --model_id "runwayml/stable-diffusion-inpainting" \
+  --model_id "stabilityai/stable-diffusion-2-inpainting" \
   --data_dir "./data/asian_faces" \
   --output_dir "./outputs/fairanon_OSG" \
   --max_train_steps 15000 \
