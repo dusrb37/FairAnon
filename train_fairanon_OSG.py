@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# train_fairanon_OSG.py
+# train_fairanon_stage1.py
 """
 FairAnon Stage 1: Orthogonal Semantic Guidance with Inpainting
 """
@@ -33,6 +33,13 @@ from diffusers import (
 from diffusers.optimization import get_scheduler
 
 logger = get_logger(__name__)
+
+
+def worker_init_fn(worker_id):
+    """Initialize worker seed for reproducibility"""
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 def generate_random_mask(image_size, min_ratio=0.1, max_ratio=0.5):
@@ -77,7 +84,7 @@ class FairAnonDataset(Dataset):
         
         print(f"Found {len(self.image_paths)} images")
         
-        # Demographic prompts (from paper)
+        # Demographic prompts
         self.demographic_prompts = [
             "An Asian man",
             "An Asian woman", 
@@ -94,7 +101,7 @@ class FairAnonDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
         ])
     
     def __len__(self):
@@ -126,13 +133,14 @@ class FairAnonDataset(Dataset):
             truncation=True,
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt"
-        ).input_ids[0]
+        )
         
         return {
             "pixel_values": image_tensor,
             "masks": mask_tensor,
             "masked_images": masked_image,
-            "input_ids": tokens
+            "input_ids": tokens.input_ids[0],
+            "attention_mask": tokens.attention_mask[0]
         }
 
 
@@ -142,17 +150,19 @@ def collate_fn(examples):
     masks = torch.stack([example["masks"] for example in examples])
     masked_images = torch.stack([example["masked_images"] for example in examples])
     input_ids = torch.stack([example["input_ids"] for example in examples])
+    attention_mask = torch.stack([example["attention_mask"] for example in examples])
     
     return {
         "pixel_values": pixel_values,
         "masks": masks,
         "masked_images": masked_images,
-        "input_ids": input_ids
+        "input_ids": input_ids,
+        "attention_mask": attention_mask
     }
 
 
 class OrthogonalSemanticGuidance:
-    """OSG"""
+    """OSG implementation"""
     
     def __init__(self, lambda_orth=0.1, lambda_norm=0.01, epsilon=0.05):
         self.lambda_orth = lambda_orth
@@ -176,7 +186,7 @@ class OrthogonalSemanticGuidance:
         """Compute OSG loss"""
         difference_vectors = []
         
-        # Step 1: Compute difference vectors
+        # Compute difference vectors
         for demographic, baseline in self.demographic_pairs:
             # Tokenize
             demo_tokens = tokenizer(
@@ -185,7 +195,7 @@ class OrthogonalSemanticGuidance:
                 truncation=True,
                 max_length=tokenizer.model_max_length,
                 return_tensors="pt"
-            ).input_ids.to(device)
+            )
             
             base_tokens = tokenizer(
                 baseline,
@@ -193,17 +203,39 @@ class OrthogonalSemanticGuidance:
                 truncation=True,
                 max_length=tokenizer.model_max_length,
                 return_tensors="pt"
-            ).input_ids.to(device)
+            )
             
-            # Get embeddings
-            demo_embeds = text_encoder(demo_tokens)[0]  # [1, seq_len, hidden_dim]
-            base_embeds = text_encoder(base_tokens)[0]
+            # Move to device
+            demo_ids = demo_tokens.input_ids.to(device)
+            demo_mask = demo_tokens.attention_mask.to(device)
+            base_ids = base_tokens.input_ids.to(device)
+            base_mask = base_tokens.attention_mask.to(device)
             
-            # Difference vector (pooled)
-            delta = (demo_embeds - base_embeds).mean(dim=1)  # [1, hidden_dim]
+            # Get embeddings with attention mask
+            demo_output = text_encoder(demo_ids, attention_mask=demo_mask)
+            base_output = text_encoder(base_ids, attention_mask=base_mask)
+            
+            # Use pooler_output if available, otherwise masked mean
+            if hasattr(demo_output, 'pooler_output') and demo_output.pooler_output is not None:
+                demo_embeds = demo_output.pooler_output
+                base_embeds = base_output.pooler_output
+            else:
+                # Masked mean pooling
+                demo_embeds = demo_output[0]  # [1, seq_len, hidden_dim]
+                base_embeds = base_output[0]
+                
+                # Apply mask for proper pooling
+                demo_masked = demo_embeds * demo_mask.unsqueeze(-1)
+                base_masked = base_embeds * base_mask.unsqueeze(-1)
+                
+                demo_embeds = demo_masked.sum(dim=1) / demo_mask.sum(dim=1, keepdim=True)
+                base_embeds = base_masked.sum(dim=1) / base_mask.sum(dim=1, keepdim=True)
+            
+            # Difference vector
+            delta = demo_embeds - base_embeds
             difference_vectors.append(delta)
         
-        # Step 2: Compute orthogonality and normalization losses
+        # Compute orthogonality and normalization losses
         orth_loss = 0
         norm_loss = 0
         
@@ -233,7 +265,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     
     # Model
-    parser.add_argument("--model_id", type=str, default="runwayml/stable-diffusion-inpainting")
+    parser.add_argument("--model_id", type=str, default="stabilityai/stable-diffusion-2-inpainting")
     
     # Data
     parser.add_argument("--data_dir", type=str, required=True, help="Directory with Asian face images")
@@ -249,7 +281,7 @@ def parse_args():
     parser.add_argument("--max_train_steps", type=int, default=15000)
     parser.add_argument("--learning_rate", type=float, default=1e-5)
     
-    # OSG hyperparameters (from paper)
+    # OSG hyperparameters
     parser.add_argument("--lambda_orth", type=float, default=0.1)
     parser.add_argument("--lambda_norm", type=float, default=0.01)
     parser.add_argument("--epsilon", type=float, default=0.05)
@@ -298,8 +330,9 @@ def main():
     unet = UNet2DConditionModel.from_pretrained(args.model_id, subfolder="unet")
     scheduler = DDPMScheduler.from_pretrained(args.model_id, subfolder="scheduler")
     
-    # Freeze VAE
+    # Freeze VAE and set to eval mode
     vae.requires_grad_(False)
+    vae.eval()
     
     # Text encoder: trainable
     text_encoder.requires_grad_(True)
@@ -348,15 +381,21 @@ def main():
         eps=1e-8
     )
     
-    # Dataset and dataloader
+    # Dataset and dataloader with generator for reproducibility
     dataset = FairAnonDataset(args.data_dir, tokenizer, args.resolution)
+    
+    generator = torch.Generator()
+    generator.manual_seed(args.seed)
     
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.train_batch_size,
         shuffle=True,
-        collate_fn=collate_fn,  # Added collate_fn
-        num_workers=args.num_workers
+        collate_fn=collate_fn,
+        num_workers=args.num_workers,
+        worker_init_fn=worker_init_fn,
+        generator=generator,
+        pin_memory=True
     )
     
     # Prepare for training
@@ -389,44 +428,55 @@ def main():
         unet.train()
         
         for step, batch in enumerate(dataloader):
+            # Move batch tensors to device with proper dtype
+            device = accelerator.device
+            pixel_values = batch["pixel_values"].to(device, dtype=weight_dtype)
+            masked_images = batch["masked_images"].to(device, dtype=weight_dtype)
+            masks = batch["masks"].to(device)
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
             
-            # Update Text Encoder with OSG ===
+            # Update Text Encoder with OSG
             with accelerator.accumulate(text_encoder):
                 osg_loss, orth_val, norm_val = osg.compute_loss(
-                    text_encoder, tokenizer, accelerator.device
+                    text_encoder, tokenizer, device
                 )
                 accelerator.backward(osg_loss)
                 text_encoder_optimizer.step()
                 text_encoder_optimizer.zero_grad()
             
-            # Update U-Net with Diffusion Loss ===
+            # Update U-Net
             with accelerator.accumulate(unet):
                 # Encode images to latent space
-                latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
-                latents = latents * vae.config.scaling_factor
+                with torch.no_grad():
+                    latents = vae.encode(pixel_values).latent_dist.sample()
+                    latents = latents * vae.config.scaling_factor
+                    
+                    masked_latents = vae.encode(masked_images).latent_dist.sample()
+                    masked_latents = masked_latents * vae.config.scaling_factor
                 
-                # Encode masked images
-                masked_latents = vae.encode(batch["masked_images"].to(dtype=weight_dtype)).latent_dist.sample()
-                masked_latents = masked_latents * vae.config.scaling_factor
-                
-                # Prepare mask for latent space
-                masks = F.interpolate(batch["masks"], size=(64, 64))
+                # Prepare mask for latent space with proper dtype
+                masks_latent = F.interpolate(masks, size=(64, 64), mode="nearest")
+                masks_latent = masks_latent.to(dtype=latents.dtype)
                 
                 # Add noise
                 noise = torch.randn_like(latents)
                 timesteps = torch.randint(
                     0, scheduler.config.num_train_timesteps,
-                    (latents.shape[0],), device=latents.device
+                    (latents.shape[0],), device=device
                 ).long()
                 
                 noisy_latents = scheduler.add_noise(latents, noise, timesteps)
                 
                 # Concatenate for inpainting model (9 channels)
-                latent_model_input = torch.cat([noisy_latents, masks, masked_latents], dim=1)
+                latent_model_input = torch.cat([noisy_latents, masks_latent, masked_latents], dim=1)
                 
                 # Get text embeddings
                 with torch.no_grad():
-                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                    encoder_hidden_states = text_encoder(
+                        input_ids,
+                        attention_mask=attention_mask
+                    )[0]
                 
                 # Predict noise
                 noise_pred = unet(latent_model_input, timesteps, encoder_hidden_states).sample
