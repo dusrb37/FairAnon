@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# train_fairanon_stage1.py
+# train_fairanon_OSG.py
 """
 FairAnon Stage 1: Orthogonal Semantic Guidance with Inpainting
 """
