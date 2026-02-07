@@ -97,13 +97,14 @@ Find the output in `./segmentation/output`
 
 ```bash
 # Train with Orthogonal Semantic Guidance
-bash train_fairanon_OSG.sh
+bash train_fairanon_osg.sh
 
 # Or run directly:
-accelerate launch train_fairanon_OSG.py \
+accelerate launch train_fairanon_osg.py \
   --model_id "stabilityai/stable-diffusion-2-inpainting" \
   --data_dir "./data/asian_faces" \
   --output_dir "./outputs/fairanon_OSG" \
+  --use_dynamic_baseline \
   --max_train_steps 15000 \
   --lambda_orth 0.1 \
   --lambda_norm 0.01 \
@@ -119,6 +120,7 @@ accelerate launch train_fairanon_OSG.py \
 - `--lambda_orth` weight for orthogonality loss
 - `--lambda_norm` weight for normalization loss
 - `--epsilon` threshold for orthogonality
+- use_dynamic_baseline` osg mode selection
 
 
 ### 2. Train for SimPO
