@@ -120,7 +120,7 @@ accelerate launch train_fairanon_osg.py \
 - `--lambda_orth` weight for orthogonality loss
 - `--lambda_norm` weight for normalization loss
 - `--epsilon` threshold for orthogonality
-- use_dynamic_baseline` osg mode selection
+- `use_dynamic_baseline` osg mode selection
 
 
 ### 2. Train for SimPO
